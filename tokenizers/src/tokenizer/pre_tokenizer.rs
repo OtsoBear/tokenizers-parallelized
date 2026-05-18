@@ -126,6 +126,34 @@ impl PreTokenizedString {
         Ok(())
     }
 
+    /// Tokenize all splits and return only token IDs, consuming `self`.
+    ///
+    /// Unlike [`tokenize`] + [`into_encoding`], this skips `Token` struct construction,
+    /// offset tracking, and `Encoding` assembly. Splits that were already tokenized
+    /// (e.g., added vocabulary tokens matched by `AddedVocabulary`) have their IDs
+    /// extracted from the existing `Token` structs.
+    ///
+    /// The `tokenize_ids` closure should use a cache-free code path (e.g.,
+    /// [`Model::tokenize_ids`]) to avoid `RwLock` contention in parallel contexts.
+    pub fn tokenize_to_ids<F>(self, tokenize_ids: F) -> Result<Vec<u32>>
+    where
+        F: Fn(&str) -> Result<Vec<u32>>,
+    {
+        let mut all_ids = Vec::new();
+        for split in self.splits {
+            if let Some(tokens) = split.tokens {
+                // Already tokenized (e.g., added vocabulary tokens)
+                for token in tokens {
+                    all_ids.push(token.id);
+                }
+            } else {
+                let ids = tokenize_ids(split.normalized.get())?;
+                all_ids.extend_from_slice(&ids);
+            }
+        }
+        Ok(all_ids)
+    }
+
     /// Transform the current `PreTokenizedString` into an `Encoding`.
     ///
     /// If a `word_idx` is provided, any word in the generated `Encoding`
